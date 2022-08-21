@@ -75,13 +75,13 @@ static uint16_t cmdSwitch;
 #endif
 
 // Optical sensors variables
-static FlagStatus   sensor1, sensor2;           // holds the sensor1 and sensor 2 values
+ FlagStatus   sensor1, sensor2;           // holds the sensor1 and sensor 2 values
 static FlagStatus   sensor1_read, sensor2_read; // holds the instantaneous Read for sensor1 and sensor 2
 
 // MPU variables
 extern MPU_Data     mpu;                        // holds the MPU-6050 data
 #if defined(MPU_SENSOR_ENABLE) || defined(SERIAL_CONTROL)
-static ErrStatus    mpuStatus;                  // holds the MPU-6050 status: SUCCESS or ERROR
+ ErrStatus    mpuStatus;                  // holds the MPU-6050 status: SUCCESS or ERROR
 #endif
 
 extern uint32_t     main_loop_counter;          // main loop counter to perform task scheduling inside main()
