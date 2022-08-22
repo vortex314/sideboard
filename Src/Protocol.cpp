@@ -12,6 +12,10 @@ extern "C"
     extern ErrStatus mpuStatus;
 }
 
+void usartSendDMA(uint8_t *buffer, uint32_t size);
+void usartSend(uint8_t *buffer, uint32_t size);
+void handleMessage(ProtocolDecoder *decoder);
+
 #define INPUT_SIZE 256
 #define OUTPUT_SIZE 256
 
@@ -23,6 +27,71 @@ extern "C" void protocol_init()
     encoder = new ProtocolEncoder(OUTPUT_SIZE);
     decoder = new ProtocolDecoder(INPUT_SIZE);
     usart_Tx_DMA_config(USART_MAIN, encoder->buffer(), encoder->size());
+}
+
+extern "C" void protocol_loop()
+{
+    if ((main_loop_counter % 1000) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
+    {
+        encoder->start().encodeArrayStart().encode("publish").encodeMapStart();
+        encoder->encode("src").encode("sideboard");
+        encoder->encode("system/alive").encode(true);
+        encoder->encode("mpu/temp").encode(mpu.temp);
+        encoder->encode("mpu/status").encode(mpuStatus);
+        encoder->encode("sensor/left").encode(sensor1);
+        encoder->encode("sensor/right").encode(sensor2);
+        encoder->encode("acc/x").encode(mpu.accel.x);
+        encoder->encode("acc/y").encode(mpu.accel.y);
+        encoder->encode("acc/z").encode(mpu.accel.z);
+        encoder->encode("gyro/x").encode(mpu.gyro.x);
+        encoder->encode("gyro/y").encode(mpu.gyro.y);
+        encoder->encode("gyro/z").encode(mpu.gyro.z);
+        encoder->encode("quat/w").encode(mpu.quat.w);
+        encoder->encode("quat/x").encode(mpu.quat.x);
+        encoder->encode("quat/y").encode(mpu.quat.y);
+        encoder->encode("quat/z").encode(mpu.quat.z);
+        encoder->encode("euler/roll").encode(mpu.euler.roll);
+        encoder->encode("euler/pitch").encode(mpu.euler.pitch);
+        encoder->encode("euler/yaw").encode(mpu.euler.yaw);
+        encoder->encodeMapEnd();
+        encoder->encodeArrayEnd().end();
+        usartSendDMA(encoder->buffer(), encoder->size());
+    }
+}
+
+extern "C" void protocol_handle(uint8_t *buffer, uint32_t size)
+{
+    if (decoder == 0)
+        return;
+    for (uint32_t i = 0; i < size; i++)
+    {
+        auto b = buffer[i];
+        if (b == PPP_FLAG_CHAR)
+        {
+            if (decoder->size() > 2 && decoder->ok() && decoder->checkCrc())
+            {
+                handleMessage(decoder);
+            }
+            decoder->reset();
+        }
+        else
+        {
+            decoder->addByte(b);
+        }
+    }
+}
+#include <string>
+void handleMessage(ProtocolDecoder *decoder)
+{
+    std::string str;
+    if (decoder->rewind().decodeArrayStart().decode(str).ok())
+    {
+        if (str == "ping" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
+        {
+            encoder->start().encodeArrayStart().encode("pong").encodeArrayEnd().end();
+            usartSendDMA(encoder->buffer(), encoder->size());
+        }
+    }
 }
 
 void usartSendDMA(uint8_t *buffer, uint32_t size)
@@ -47,25 +116,6 @@ void usartSend(uint8_t *buffer, uint32_t size)
     }
 }
 
-extern "C" void protocol_loop()
-{
-    if ((main_loop_counter % 100) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
-    {
-        encoder->start().encodeArrayStart().encode("publish").encodeMapStart();
-        encoder->encode("src").encode("sideboard");
-        encoder->encode("mpu/temp").encode(mpu.temp);
-        encoder->encode("mpu/status").encode(mpuStatus);
-        encoder->encode("sensor/left").encode(sensor1);
-        encoder->encode("sensor/right").encode(sensor2);
-        encoder->encode("acc/x").encode(mpu.accel.x).encode("acc/y").encode(mpu.accel.y).encode("acc/z").encode(mpu.accel.z);
-        encoder->encode("gyro/x").encode(mpu.gyro.x).encode("gyro/y").encode(mpu.gyro.y).encode("gyro/z").encode(mpu.gyro.z);
-        encoder->encode("quat/w").encode(mpu.quat.w).encode("quat/x").encode(mpu.quat.x).encode("quat/y").encode(mpu.quat.y).encode("quat/z").encode(mpu.quat.z);
-        encoder->encode("euler/roll").encode(mpu.euler.roll).encode("euler/pitch").encode(mpu.euler.pitch).encode("euler/yaw").encode(mpu.euler.yaw);
-        encoder->encodeMapEnd();
-        encoder->encodeArrayEnd().end();
-        usartSendDMA(encoder->buffer(), encoder->size());
-    }
-}
 //==============================================================================
 static const uint16_t fcsTable[256] = {
     0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF, 0x8C48,
@@ -293,4 +343,131 @@ ProtocolDecoder::ProtocolDecoder(uint32_t size)
     _buffer = new uint8_t[size];
     _capacity = size;
     _index = 0;
+}
+
+void ProtocolDecoder::reset()
+{
+    _index = 0;
+    _error = 0;
+    _readPtr = 0;
+}
+
+ProtocolDecoder &ProtocolDecoder::rewind()
+{
+    _error = 0;
+    _readPtr = 0;
+    return *this;
+}
+
+void ProtocolDecoder::addByte(uint8_t c)
+{
+    static bool escFlag = false;
+    if (_index + 1 > _capacity)
+    {
+        _error = ENOMEM;
+        return;
+    }
+    if (escFlag)
+    {
+        escFlag = false;
+        _buffer[_index++] = c ^ PPP_MASK_CHAR;
+    }
+    else
+    {
+        if (c == PPP_ESC_CHAR)
+        {
+            escFlag = true;
+        }
+        else
+        {
+            _buffer[_index++] = c;
+        }
+    }
+}
+
+bool ProtocolDecoder::checkCrc()
+{
+    Fcs fcs;
+    for (uint32_t i = 0; i < _index; i++)
+    {
+        fcs.write(_buffer[i]);
+    }
+    if (fcs.result() == 0x0F47)
+    {
+        _index -= 2;
+        return true;
+    }
+    return false;
+}
+
+ProtocolDecoder &ProtocolDecoder::decodeArrayStart()
+{
+    if (ok() && _buffer[_readPtr] == (MT_ARRAY << 5) + 31)
+        advance(1);
+    else
+        _error = EPROTO;
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::decodeArrayEnd()
+{
+    if (ok() && _buffer[_readPtr] == (MT_PRIMITIVE << 5) + 31)
+        advance(1);
+    else
+        _error = EPROTO;
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::decodeMapStart()
+{
+    if (ok() && _buffer[_readPtr] == (MT_MAP << 5) + 31)
+        advance(1);
+    else
+        _error = EPROTO;
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::decodeMapEnd()
+{
+    if (ok() && _buffer[_readPtr] == (MT_PRIMITIVE << 5) + 31)
+        advance(1);
+    else
+        _error = EPROTO;
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::decode(std::string &s)
+{
+    if (majorType() == MT_TEXT)
+    {
+        uint32_t size = read() & 0x1F;
+        for (uint32_t i = 0; i < size; i++)
+        {
+            s.push_back(read());
+        }
+    }
+    return *this;
+}
+
+void ProtocolDecoder::advance(uint32_t size)
+{
+    if (_readPtr + size > _index)
+        _error = ENOBUFS;
+    else
+        _readPtr += size;
+}
+
+uint8_t ProtocolDecoder::read()
+{
+    uint8_t c = _buffer[_readPtr];
+    advance(1);
+    return c;
+}
+
+MajorType ProtocolDecoder::majorType()
+{
+    if (ok())
+        return (MajorType)(_buffer[_readPtr] >> 5);
+    else
+        return MT_INVALID;
 }

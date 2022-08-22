@@ -33,10 +33,14 @@
 static SerialSideboard Sideboard;
 #endif
 
-#if defined(SERIAL_DEBUG) || defined(SERIAL_FEEDBACK)
+#if defined(SERIAL_DEBUG) || defined(SERIAL_FEEDBACK) || defined(PROTOCOL)
 static uint8_t  rx1_buffer[SERIAL_BUFFER_SIZE]; // USART Rx DMA circular buffer
 static uint32_t rx1_buffer_len = ARRAY_LEN(rx1_buffer);
 #endif
+
+#ifdef PROTOCOL
+extern void protocol_handle(uint8_t* buffer, uint32_t len);
+#endif // PROTOCOL
 
 #ifdef SERIAL_FEEDBACK
 static SerialFeedback Feedback;
@@ -199,7 +203,7 @@ void input_init(void) {
     #ifdef SERIAL_CONTROL
         usart_Tx_DMA_config(USART_MAIN, (uint8_t *)&Sideboard, sizeof(Sideboard));
     #endif
-    #if defined(SERIAL_DEBUG) || defined(SERIAL_FEEDBACK)
+    #if defined(SERIAL_DEBUG) || defined(SERIAL_FEEDBACK) || defined(PROTOCOL)
         usart_Rx_DMA_config(USART_MAIN, (uint8_t *)rx1_buffer, sizeof(rx1_buffer));
     #endif
     #ifdef SERIAL_AUX_TX
@@ -441,6 +445,27 @@ void usart1_rx_check(void)
         old_pos = 0;
     }
     #endif // SERIAL_FEEDBACK
+    static uint32_t old_pos;
+    uint32_t pos;
+
+    pos = rx1_buffer_len - dma_transfer_number_get(USART1_RX_DMA_CH);           // Calculate current position in buffer
+    if (pos != old_pos) {                                                       // Check change in received data
+        if (pos > old_pos) {                                                    // "Linear" buffer mode: check if current position is over previous one
+            protocol_handle(&rx1_buffer[old_pos], pos - old_pos);           // Process data
+        } else {                                                                // "Overflow" buffer mode
+            protocol_handle(&rx1_buffer[old_pos], rx1_buffer_len - old_pos);// First Process data from the end of buffer
+            if (pos > 0) {                                                      // Check and continue with beginning of buffer
+                protocol_handle(&rx1_buffer[0], pos);                       // Process remaining data
+            }
+        }
+    }
+    old_pos = pos;                                                              // Update old position
+    if (old_pos == rx1_buffer_len) {                                            // Check and manually update if we reached end of buffer
+        old_pos = 0;
+    }
+    #ifdef PROTOCOL
+
+    #endif // PROTOCOL
 }
 
 /*

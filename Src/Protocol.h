@@ -103,28 +103,47 @@ private:
     void encode_type_and_length(MajorType majorType, uint64_t length);
 };
 
+class ProtocolDecoder;
+#include <string>
+typedef void (*ProtocolHandler)(ProtocolDecoder *);
+
 class ProtocolDecoder
 {
 public:
     ProtocolDecoder(uint32_t);
-    bool ok();
+    inline bool ok() { return _error == 0; };
     void deframe(uint8_t *, uint32_t);
-    MajorType type();
-    bool decode(int &);
-    bool decode(unsigned int &);
-    bool decode(long &);
-    bool decode(unsigned long &);
-    bool decode(long long &);
-    bool decode(unsigned long long &);
-    bool decode(float &);
-    bool decode(double &);
-    bool decode(char *);
+    MajorType majorType();
+    void reset();
+    bool checkCrc();
+    ProtocolDecoder& decodeArrayStart();
+    ProtocolDecoder& decodeArrayEnd();
+    ProtocolDecoder& decodeMapStart();
+    ProtocolDecoder& decodeMapEnd();
+    ProtocolDecoder& get(int &);
+    ProtocolDecoder& get(unsigned int &);
+    ProtocolDecoder& get(long &);
+    ProtocolDecoder& get(unsigned long &);
+    ProtocolDecoder& get(long long &);
+    ProtocolDecoder& get(unsigned long long &);
+    ProtocolDecoder& get(float &);
+    ProtocolDecoder& get(double &);
+    ProtocolDecoder& get(char *,uint32_t);
+    ProtocolDecoder& decode(std::string&);
+    void addByte(uint8_t);
+    uint8_t *buffer() { return _buffer; }
+    uint32_t size() { return _index; }
+    int error() { return _error; }
+    ProtocolDecoder& rewind() ;
 
 private:
     uint8_t *_buffer;
     uint32_t _capacity;
     uint32_t _index;
+    uint32_t _readPtr;
+    Fcs _fcs;
     MajorType _type;
     int _error;
     uint8_t read();
+    void advance(uint32_t);
 };
