@@ -33,39 +33,40 @@ extern "C" void protocol_loop()
 {
     if ((main_loop_counter % 100000) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
     {
-        encoder->start().encodeArrayStart().encode("pub").encode("src/sideboard/").encodeMapStart();
-        encoder->encode("system/alive").encode(true);
-        encoder->encode("mpu/temp").encode(mpu.temp);
-        encoder->encode("mpu/status").encode(mpuStatus);
-        encoder->encode("sensor/left").encode(sensor1);
-        encoder->encode("sensor/right").encode(sensor2);
-        encoder->encode("acc/x").encode(mpu.accel.x);
-        encoder->encode("acc/y").encode(mpu.accel.y);
-        encoder->encode("acc/z").encode(mpu.accel.z);
-        encoder->encode("gyro/x").encode(mpu.gyro.x);
-        encoder->encode("gyro/y").encode(mpu.gyro.y);
-        encoder->encode("gyro/z").encode(mpu.gyro.z);
-        encoder->encode("quat/w").encode(mpu.quat.w);
-        encoder->encode("quat/x").encode(mpu.quat.x);
-        encoder->encode("quat/y").encode(mpu.quat.y);
-        encoder->encode("quat/z").encode(mpu.quat.z);
-        encoder->encode("euler/roll").encode(mpu.euler.roll);
-        encoder->encode("euler/pitch").encode(mpu.euler.pitch);
-        encoder->encode("euler/yaw").encode(mpu.euler.yaw);
-        encoder->encodeMapEnd();
-        encoder->encodeArrayEnd().end();
+        encoder->start().writeArrayStart().write("pub").write("src/sideboard/");
+        encoder->writeMapStart();
+        encoder->write("system/alive").write(true);
+        encoder->write("mpu/temp").write(mpu.temp);
+        encoder->write("mpu/status").write(mpuStatus);
+        encoder->write("sensor/left").write(sensor1);
+        encoder->write("sensor/right").write(sensor2);
+        encoder->write("acc/x").write(mpu.accel.x);
+        encoder->write("acc/y").write(mpu.accel.y);
+        encoder->write("acc/z").write(mpu.accel.z);
+        encoder->write("gyro/x").write(mpu.gyro.x);
+        encoder->write("gyro/y").write(mpu.gyro.y);
+        encoder->write("gyro/z").write(mpu.gyro.z);
+        encoder->write("quat/w").write(mpu.quat.w);
+        encoder->write("quat/x").write(mpu.quat.x);
+        encoder->write("quat/y").write(mpu.quat.y);
+        encoder->write("quat/z").write(mpu.quat.z);
+        encoder->write("euler/roll").write(mpu.euler.roll);
+        encoder->write("euler/pitch").write(mpu.euler.pitch);
+        encoder->write("euler/yaw").write(mpu.euler.yaw);
+        encoder->writeMapEnd();
+        encoder->writeArrayEnd().end();
         usartSendDMA(encoder->buffer(), encoder->size());
     }
     else if ((main_loop_counter % 5500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
     {
-        encoder->start().encodeArrayStart().encode("sub").encode("dst/sideboard/*").encodeArrayEnd().end();
+        encoder->start().writeArrayStart().write("sub").write("dst/sideboard/*").writeArrayEnd().end();
         usartSendDMA(encoder->buffer(), encoder->size());
     }
     else if ((main_loop_counter % 10500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
     {
         uint32_t msec;
         get_tick_count_ms(&msec);
-        encoder->start().encodeArrayStart().encode("pub").encode("dst/sideboard/").encodeMapStart().encode("system/uptime").encode(msec).encodeMapEnd().encodeArrayEnd().end();
+        encoder->start().writeArrayStart().write("pub").write("dst/sideboard/").writeMapStart().write("system/uptime").write(msec).writeMapEnd().writeArrayEnd().end();
         usartSendDMA(encoder->buffer(), encoder->size());
     }
 }
@@ -87,7 +88,7 @@ extern "C" void protocol_handle(uint8_t *buffer, uint32_t size)
         }
         else
         {
-            decoder->addByte(b);
+            decoder->addUnEscaped(b);
         }
     }
 }
@@ -95,25 +96,30 @@ extern "C" void protocol_handle(uint8_t *buffer, uint32_t size)
 void handleMessage(ProtocolDecoder *decoder)
 {
     std::string str;
-    if (decoder->rewind().arrayStart().get(str).ok())
+    if (decoder->rewind().readArrayStart().read(str).ok())
     {
         if (str == "ping" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
         {
-            encoder->start().encodeArrayStart().encode("pong").encodeArrayEnd().end();
+            encoder->start().writeArrayStart().write("pong").writeArrayEnd().end();
             usartSendDMA(encoder->buffer(), encoder->size());
         }
         else if (str == "pub" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
         {
-            if ( decoder->get(str).ok() ) {
-                if ( str =="dst/sideboard/system/uptime") {
-                    uint32_t msec;
+            if (decoder->read(str).ok())
+            {
+                if (str == "dst/sideboard/system/uptime")
+                {
+                    uint32_t msec = 0;
                     uint32_t now;
                     get_tick_count_ms(&now);
-                    if ( decoder->get(msec).ok()) {
-                        encoder->start().encodeArrayStart().encode("pub").encode("src/sideboard/system/latency").encode(now-msec).end();
+                    if (decoder->read(msec).ok())
+                    {
+                        encoder->start().writeArrayStart().write("pub").write("src/sideboard/system/latency").write(now - msec).end();
                     }
-                } else {
-                    encoder->start().encodeArrayStart().encode("pubReceived").encodeArrayEnd().end();
+                }
+                else
+                {
+                    encoder->start().writeArrayStart().write("pubReceived").writeArrayEnd().end();
                 }
             }
             usartSendDMA(encoder->buffer(), encoder->size());
@@ -189,11 +195,6 @@ ProtocolEncoder::ProtocolEncoder(uint32_t size)
     _index = 0;
 }
 
-bool ProtocolEncoder::ok()
-{
-    return _error == 0;
-}
-
 ProtocolEncoder &ProtocolEncoder::start()
 {
     _index = 0;
@@ -212,53 +213,166 @@ ProtocolEncoder &ProtocolEncoder::end()
     return *this;
 }
 
-ProtocolEncoder &ProtocolEncoder::encode(int64_t value)
+ProtocolEncoder &ProtocolEncoder::writeNull()
 {
-    /* adapted from code in RFC 7049 appendix C (pseudocode) */
-    uint64_t ui;                                                   /* extend sign to whole length */
-    MajorType majorType = (value < 0) ? MT_NEGATIVE : MT_UNSIGNED; /* extract major type */
-    if (majorType == MT_NEGATIVE)
-        ui = value ^ 0xFFFFFFFFFFFFFFFF; /* remove sign bit */
+    addEscaped(0xf6);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::writeUndefined()
+{
+    addEscaped(0xf7);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::write(bool value)
+{
+    addEscaped(value ? 0xf5 : 0xf4);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::writeBreak()
+{
+    addEscaped(0xff);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::write(uint64_t value)
+{
+    write_type_and_value(0, value);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::write(uint32_t value)
+{
+    return write((uint64_t)value);
+}
+
+ProtocolEncoder &ProtocolEncoder::write(int value)
+{
+    return write((int64_t)value);
+}
+
+ProtocolEncoder &ProtocolEncoder::write(int32_t value)
+{
+    return write((int64_t)value);
+}
+
+ProtocolEncoder &ProtocolEncoder::write(int64_t value)
+{
+    if (value < 0)
+        write_type_and_value(1, -(value + 1));
     else
-        ui = value;
-    encode_type_and_length(majorType, ui);
+        write_type_and_value(0, value);
     return *this;
 }
 
-ProtocolEncoder &ProtocolEncoder::encode(int value)
+ProtocolEncoder &ProtocolEncoder::write(std::vector<uint8_t> &bs)
 {
-    return encode((int64_t)value);
-}
-
-ProtocolEncoder &ProtocolEncoder::encode(int32_t value)
-{
-    return encode((int64_t)value);
-}
-
-ProtocolEncoder &ProtocolEncoder::encode(uint32_t value)
-{
-    return encode((int64_t)value);
-}
-
-ProtocolEncoder &ProtocolEncoder::encode(uint64_t value)
-{
-    return encode((int64_t)value);
-}
-
-ProtocolEncoder &ProtocolEncoder::encode(const char *value)
-{
-    encode_type_and_length(MT_TEXT, strlen(value));
-    addEscaped((uint8_t *)value, strlen(value));
+    write_type_and_value(2, bs.size());
+    for (size_t i = 0; i < bs.size(); i++)
+        addEscaped(bs[i]);
     return *this;
 }
 
-ProtocolEncoder &ProtocolEncoder::encode(bool b)
+void ProtocolEncoder::write_type_and_value(uint8_t major_type, uint64_t value)
 {
-    addEscaped((MT_PRIMITIVE << 5) + 20 + (b ? 1 : 0));
+    major_type <<= 5u;
+    if (value < 24)
+    {
+        addEscaped((uint8_t)(major_type | value));
+    }
+    else if (value < 256)
+    {
+        addEscaped((uint8_t)(major_type | 24u));
+        addEscaped((uint8_t)value);
+    }
+    else if (value < 65536)
+    {
+        addEscaped((uint8_t)(major_type | 25u));
+        addEscaped((uint8_t)(value >> 8u));
+        addEscaped((uint8_t)value);
+    }
+    else if (value < 4294967296ULL)
+    {
+        addEscaped((uint8_t)(major_type | 26u));
+        addEscaped((uint8_t)(value >> 24u));
+        addEscaped((uint8_t)(value >> 16u));
+        addEscaped((uint8_t)(value >> 8u));
+        addEscaped((uint8_t)value);
+    }
+    else
+    {
+        addEscaped((uint8_t)(major_type | 27u));
+        addEscaped((uint8_t)(value >> 56u));
+        addEscaped((uint8_t)(value >> 48u));
+        addEscaped((uint8_t)(value >> 40u));
+        addEscaped((uint8_t)(value >> 32u));
+        addEscaped((uint8_t)(value >> 24u));
+        addEscaped((uint8_t)(value >> 16u));
+        addEscaped((uint8_t)(value >> 8u));
+        addEscaped((uint8_t)(value));
+    }
+}
+
+ProtocolEncoder &ProtocolEncoder::write(const std::string &s)
+{
+    write_type_and_value(3, s.size());
+    for (size_t i = 0; i < s.size(); i++)
+        addEscaped(s.c_str()[i]);
     return *this;
 }
 
-ProtocolEncoder &ProtocolEncoder::encode(float d)
+ProtocolEncoder &ProtocolEncoder::write(const char*s)
+{
+    size_t size = strlen(s);
+    write_type_and_value(3, size);
+    for (size_t i = 0; i < size; i++)
+        addEscaped(s[i]);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::writeArrayStart()
+{
+    addEscaped(0x9f);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::writeArrayEnd()
+{
+    return writeBreak();
+}
+
+ProtocolEncoder &ProtocolEncoder::writeArray(uint64_t size)
+{
+    write_type_and_value(4, size);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::writeMap(uint64_t size)
+{
+    write_type_and_value(5, size);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::writeMapStart()
+{
+    addEscaped(0xbf);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::writeMapEnd()
+{
+    return writeBreak();
+}
+
+ProtocolEncoder &ProtocolEncoder::writeTag(uint64_t tag)
+{
+    write_type_and_value(6, tag);
+    return *this;
+}
+
+ProtocolEncoder &ProtocolEncoder::write(float d)
 {
     addEscaped(CborFloatType);
     uint8_t *pb = (uint8_t *)&d;
@@ -267,36 +381,12 @@ ProtocolEncoder &ProtocolEncoder::encode(float d)
     return *this;
 }
 
-ProtocolEncoder &ProtocolEncoder::encode(double d)
+ProtocolEncoder &ProtocolEncoder::write(double d)
 {
     addEscaped(CborDoubleType);
     uint8_t *pb = (uint8_t *)&d;
     for (int i = 0; i < 8; i++)
         addEscaped(*(pb + 7 - i));
-    return *this;
-}
-
-ProtocolEncoder &ProtocolEncoder::encodeArrayStart()
-{
-    addEscaped((MT_ARRAY << 5) + 31);
-    return *this;
-}
-
-ProtocolEncoder &ProtocolEncoder::encodeArrayEnd()
-{
-    addEscaped((MT_PRIMITIVE << 5) + 31);
-    return *this;
-}
-
-ProtocolEncoder &ProtocolEncoder::encodeMapStart()
-{
-    addEscaped((MT_MAP << 5) + 31);
-    return *this;
-}
-
-ProtocolEncoder &ProtocolEncoder::encodeMapEnd()
-{
-    addEscaped((MT_PRIMITIVE << 5) + 31);
     return *this;
 }
 
@@ -329,62 +419,18 @@ void ProtocolEncoder::addByte(uint8_t value)
     _buffer[_index++] = value;
 }
 
-void ProtocolEncoder::encode_type_and_length(MajorType majorType, uint64_t length)
-{
-    int symbol = majorType << 5;
-    if (length <= 23L)
-    {
-        addEscaped((uint8_t)(symbol | length));
-    }
-    else if (length <= 255L)
-    {
-        symbol |= ONE_BYTE;
-        addEscaped((uint8_t)symbol);
-        addEscaped((uint8_t)length);
-    }
-    else if (length <= 65535L)
-    {
-        symbol |= TWO_BYTES;
-        addEscaped((uint8_t)symbol);
-        addEscaped((uint8_t)(length >> 8));
-        addEscaped((uint8_t)(length & 0xFF));
-    }
-    else if (length <= 4294967295L)
-    {
-        symbol |= FOUR_BYTES;
-        addEscaped((uint8_t)symbol);
-        addEscaped((uint8_t)((length >> 24) & 0xFF));
-        addEscaped((uint8_t)((length >> 16) & 0xFF));
-        addEscaped((uint8_t)((length >> 8) & 0xFF));
-        addEscaped((uint8_t)(length & 0xFF));
-    }
-    else
-    {
-        symbol |= EIGHT_BYTES;
-        addEscaped((uint8_t)symbol);
-        addEscaped((uint8_t)((length >> 56) & 0xFF));
-        addEscaped((uint8_t)((length >> 48) & 0xFF));
-        addEscaped((uint8_t)((length >> 40) & 0xFF));
-        addEscaped((uint8_t)((length >> 32) & 0xFF));
-        addEscaped((uint8_t)((length >> 24) & 0xFF));
-        addEscaped((uint8_t)((length >> 16) & 0xFF));
-        addEscaped((uint8_t)((length >> 8) & 0xFF));
-        addEscaped((uint8_t)(length & 0xFF));
-    }
-}
-
 //===============================================================
 
 ProtocolDecoder::ProtocolDecoder(uint32_t size)
 {
     _buffer = new uint8_t[size];
     _capacity = size;
-    _index = 0;
+    _writePtr = 0;
 }
 
 void ProtocolDecoder::reset()
 {
-    _index = 0;
+    _writePtr = 0;
     _error = 0;
     _readPtr = 0;
 }
@@ -396,10 +442,10 @@ ProtocolDecoder &ProtocolDecoder::rewind()
     return *this;
 }
 
-void ProtocolDecoder::addByte(uint8_t c)
+void ProtocolDecoder::addUnEscaped(uint8_t c)
 {
     static bool escFlag = false;
-    if (_index + 1 > _capacity)
+    if (_writePtr + 1 > _capacity)
     {
         _error = ENOMEM;
         return;
@@ -407,7 +453,7 @@ void ProtocolDecoder::addByte(uint8_t c)
     if (escFlag)
     {
         escFlag = false;
-        _buffer[_index++] = c ^ PPP_MASK_CHAR;
+        _buffer[_writePtr++] = c ^ PPP_MASK_CHAR;
     }
     else
     {
@@ -417,103 +463,168 @@ void ProtocolDecoder::addByte(uint8_t c)
         }
         else
         {
-            _buffer[_index++] = c;
+            _buffer[_writePtr++] = c;
         }
     }
+}
+
+bool ProtocolDecoder::next()
+{
+    _h.hdr = get_byte();
+    if (!ok())
+        return false;
+    const uint8_t t = _h.hdr & 31u;
+
+    if (t < 24)
+    {
+        _h.val = t;
+    }
+    else if (t == 24)
+    {
+        _h.val = get_byte();
+    }
+    else if (t == 25)
+    {
+        _h.val = get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+    }
+    else if (t == 26)
+    {
+        _h.val = get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+    }
+    else if (t == 27)
+    {
+        _h.val = get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+        _h.val = (_h.val << 8u) + get_byte();
+    }
+    else if (t != 31)
+    {
+        error(EPROTO);
+        return false;
+    }
+
+    return true;
 }
 
 bool ProtocolDecoder::checkCrc()
 {
     Fcs fcs;
-    for (uint32_t i = 0; i < _index; i++)
+    for (uint32_t i = 0; i < _writePtr; i++)
     {
         fcs.write(_buffer[i]);
     }
     if (fcs.result() == 0x0F47)
     {
-        _index -= 2;
+        _writePtr -= 2;
         return true;
     }
     return false;
 }
 
-ProtocolDecoder &ProtocolDecoder::arrayStart()
+ProtocolDecoder &ProtocolDecoder::readArrayStart()
 {
-    if (ok() && _buffer[_readPtr] == (MT_ARRAY << 5) + 31)
-        advance(1);
-    else
-        _error = EPROTO;
-    return *this;
-}
-
-ProtocolDecoder &ProtocolDecoder::arrayEnd()
-{
-    if (ok() && _buffer[_readPtr] == (MT_PRIMITIVE << 5) + 31)
-        advance(1);
-    else
-        _error = EPROTO;
-    return *this;
-}
-
-ProtocolDecoder &ProtocolDecoder::mapStart()
-{
-    if (ok() && _buffer[_readPtr] == (MT_MAP << 5) + 31)
-        advance(1);
-    else
-        _error = EPROTO;
-    return *this;
-}
-
-ProtocolDecoder &ProtocolDecoder::mapEnd()
-{
-    if (ok() && _buffer[_readPtr] == (MT_PRIMITIVE << 5) + 31)
-        advance(1);
-    else
-        _error = EPROTO;
-    return *this;
-}
-
-ProtocolDecoder &ProtocolDecoder::get(std::string &s)
-{
-    if (majorType() == MT_TEXT)
+    if (ok() && next() && _h.is_array())
     {
-        uint32_t size = read() & 0x1F;
-        for (uint32_t i = 0; i < size; i++)
-        {
-            s.push_back(read());
-        }
     }
+    else
+        error(EPROTO);
     return *this;
 }
 
-ProtocolDecoder &ProtocolDecoder::get(uint32_t &ui)
+ProtocolDecoder &ProtocolDecoder::readArrayEnd()
 {
-    if (majorType() == MT_UNSIGNED)
+    if (ok() && next() && _h.is_break())
     {
-        
     }
+    else
+        error(EPROTO);
     return *this;
 }
 
-void ProtocolDecoder::advance(uint32_t size)
+ProtocolDecoder &ProtocolDecoder::readMapEnd()
 {
-    if (_readPtr + size > _index)
-        _error = ENOBUFS;
-    else
-        _readPtr += size;
+    return readArrayEnd();
 }
 
-uint8_t ProtocolDecoder::read()
+ProtocolDecoder &ProtocolDecoder::readMapStart()
 {
-    uint8_t c = _buffer[_readPtr];
-    advance(1);
-    return c;
+    if (ok() && next() && _h.is_map())
+    {
+    }
+    else
+        error(EPROTO);
+    return *this;
 }
 
-MajorType ProtocolDecoder::majorType()
+ProtocolDecoder &ProtocolDecoder::read(std::string &s)
 {
-    if (ok())
-        return (MajorType)(_buffer[_readPtr] >> 5);
+    if (ok() && next() && _h.is_string())
+    {
+        s.clear();
+        for (uint32_t i = 0; i < _h.val; i++)
+            s.push_back(get_byte());
+    }
     else
-        return MT_INVALID;
+        error(EPROTO);
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::read(uint64_t &ui)
+{
+    if (ok() && next() && _h.is_uint())
+    {
+        ui = _h.val;
+    }
+    else
+        error(EPROTO);
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::read(uint32_t &ui)
+{
+    uint64_t ui64;
+    read(ui64);
+    ui=ui64;
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::read(int64_t &i)
+{
+    if (ok() && next() && ( _h.is_uint() || _h.is_int() ))
+    {
+        if ( _h.is_uint() ) i = _h.val;
+        else i = -1 - _h.val;
+    }
+    else
+        error(EPROTO);
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::read(bool &b)
+{
+    if (ok() && next() && ( _h.is_bool() ))
+    {
+        b = _h.as_bool();
+    }
+    else
+        error(EPROTO);
+    return *this;
+}
+
+uint8_t ProtocolDecoder::get_byte()
+{
+    if (_readPtr < _writePtr)
+    {
+        return _buffer[_readPtr++];
+    };
+    return 0;
 }

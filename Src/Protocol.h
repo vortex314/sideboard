@@ -1,7 +1,17 @@
 #include <stdint.h>
 #include <cstring>
 #include <errno.h>
+extern "C"
+{
 #include <systick.h>
+};
+//=========================================================================================
+// ================== CBOR ENCODER STREAM ===================
+#include <cstdint>
+#include <vector>
+#include <string>
+
+//==============================================================
 
 class Fcs
 {
@@ -22,21 +32,6 @@ public:
 #define PPP_ESC_CHAR 0x7D
 #define PPP_FLAG_CHAR 0x7E
 
-typedef enum
-{
-    MT_INVALID = -1,
-    MT_UNSIGNED = 0,
-    MT_NEGATIVE = 1,
-    MT_BYTES = 2,
-    MT_TEXT = 3,
-    MT_ARRAY = 4,
-    MT_MAP = 5,
-    MT_TAG = 6,
-    MT_PRIMITIVE = 7,
-    MT_INDEFINITE = 8,
-    MT_RAW = 9
-} MajorType;
-
 typedef enum CborType
 {
     CborIntegerType = 0x00,
@@ -52,99 +47,189 @@ typedef enum CborType
     CborHalfFloatType = 0xf9,
     CborFloatType = 0xfa,
     CborDoubleType = 0xfb,
-
+    CborBreakType = 0xff,
     CborInvalidType = 0xff /* equivalent to the break byte, so it will never be used */
 } CborType;
-
-typedef enum
-{
-    DIRECT = -1,
-    ONE_BYTE = 24,
-    TWO_BYTES = 25,
-    FOUR_BYTES = 26,
-    EIGHT_BYTES = 27,
-    RESERVED = 28,
-    INDEFINITE = 31
-} AdditionalInformation;
 
 class ProtocolEncoder
 {
 public:
     ProtocolEncoder(uint32_t);
-    bool ok();
+
     ProtocolEncoder &start();
     ProtocolEncoder &end();
-    ProtocolEncoder &encode(int);
-    ProtocolEncoder &encode(unsigned int);
-    ProtocolEncoder &encode(long);
-    ProtocolEncoder &encode(unsigned long);
-    ProtocolEncoder &encode(long long);
-    ProtocolEncoder &encode(unsigned long long);
-    ProtocolEncoder &encode(float);
-    ProtocolEncoder &encode(double);
-    ProtocolEncoder &encode(const char *);
-    ProtocolEncoder &encode(bool);
-    ProtocolEncoder &encodeArrayStart();
-    ProtocolEncoder &encodeArrayEnd();
-    ProtocolEncoder &encodeMapStart();
-    ProtocolEncoder &encodeMapEnd();
+    ProtocolEncoder &write(int);
+    ProtocolEncoder &write(unsigned int);
+    ProtocolEncoder &write(int32_t);
+    ProtocolEncoder &write(uint32_t);
+    ProtocolEncoder &write(int64_t);
+    ProtocolEncoder &write(uint64_t);
+    ProtocolEncoder &write(float);
+    ProtocolEncoder &write(double);
+    ProtocolEncoder &write(const char *);
+    ProtocolEncoder &write(bool);
+    ProtocolEncoder &write(std::vector<uint8_t> &);
+    ProtocolEncoder &write(const std::string &);
+    ProtocolEncoder &writeArrayStart();
+    ProtocolEncoder &writeArrayEnd();
+    ProtocolEncoder &writeArray(uint64_t);
+    ProtocolEncoder &writeMapStart();
+    ProtocolEncoder &writeMapEnd();
+    ProtocolEncoder &writeMap(uint64_t);
+    ProtocolEncoder &writeNull();
+    ProtocolEncoder &writeUndefined();
+    ProtocolEncoder &writeBreak();
+    ProtocolEncoder &write(char);
+    ProtocolEncoder &writeTag(uint64_t);
 
     inline uint8_t *buffer() { return _buffer; }
     inline uint32_t size() { return _index; }
+    inline void error(int x)
+    {
+        _error = x;
+    }
+    inline bool ok() { return _error == 0; }
 
 private:
     uint8_t *_buffer;
     uint32_t _capacity;
     uint32_t _index;
-    Fcs _fcs;
     int _error;
+    Fcs _fcs;
     void addByte(uint8_t value);
     void addEscaped(uint8_t);
     void addEscaped(uint8_t *, uint32_t);
-    void encode_type_and_length(MajorType majorType, uint64_t length);
+    void write_type_and_value(uint8_t, uint64_t);
 };
 
-class ProtocolDecoder;
-#include <string>
-typedef void (*ProtocolHandler)(ProtocolDecoder *);
+//====================================================================================
+class CborHeader
+{
+public:
+    bool is_null() const { return hdr == CborNullType; }
+
+    bool is_undefined() const { return hdr == CborUndefinedType; }
+
+    bool is_bool() const { return hdr == 0xf4 || hdr == 0xf5; }
+
+    bool is_break() const { return hdr == 0xff; }
+
+    bool is_bytes() const { return hdr >> 5u == 2; }
+
+    bool is_string() const { return hdr >> 5u == 3; }
+
+    bool is_array() const { return hdr >> 5u == 4; }
+
+    bool is_indefinite_array() const { return hdr == 0x9f; }
+
+    bool is_map() const { return hdr >> 5u == 5; }
+
+    bool is_indefinite_map() const { return hdr == 0xb6; }
+
+    bool is_tag() const { return hdr >> 5u == 6; }
+
+    bool as_bool() const
+    {
+        if (hdr == 0xf4)
+            return false;
+
+        return true;
+    }
+
+    bool is_uint() const
+    {
+        return hdr >> 5u == 0;
+    }
+
+    bool is_int() const
+    {
+        return hdr >> 5u == 1;
+    }
+
+    uint64_t as_uint() const
+    {
+        return val;
+    }
+
+    int64_t as_int() const
+    {
+        if (hdr >> 5u == 0)
+            return val;
+        if (hdr >> 5u != 1)
+            return -1 - val;
+    }
+
+    uint64_t as_bytes_header() const
+    {
+        return val;
+    }
+
+    uint64_t as_string_header() const
+    {
+        return val;
+    }
+
+    uint64_t as_array() const
+    {
+        return val;
+    }
+
+    uint64_t as_map() const
+    {
+        return val;
+    }
+
+    uint64_t as_tag() const
+    {
+        return val;
+    }
+
+    uint8_t hdr = 0;
+    uint64_t val = 0;
+};
 
 class ProtocolDecoder
 {
 public:
     ProtocolDecoder(uint32_t);
-    inline bool ok() { return _error == 0; };
     void deframe(uint8_t *, uint32_t);
-    MajorType majorType();
     void reset();
     bool checkCrc();
-    ProtocolDecoder& arrayStart();
-    ProtocolDecoder& arrayEnd();
-    ProtocolDecoder& mapStart();
-    ProtocolDecoder& mapEnd();
-    ProtocolDecoder& get(int &);
-    ProtocolDecoder& get(unsigned int &);
-    ProtocolDecoder& get(long &);
-    ProtocolDecoder& get(unsigned long &);
-    ProtocolDecoder& get(long long &);
-    ProtocolDecoder& get(unsigned long long &);
-    ProtocolDecoder& get(float &);
-    ProtocolDecoder& get(double &);
-    ProtocolDecoder& get(char *,uint32_t);
-    ProtocolDecoder& get(std::string&);
-    void addByte(uint8_t);
+    void addUnEscaped(uint8_t);
     uint8_t *buffer() { return _buffer; }
-    uint32_t size() { return _index; }
-    int error() { return _error; }
-    ProtocolDecoder& rewind() ;
+    uint32_t size() { return _writePtr; }
+    inline uint8_t peek() { return _buffer[_readPtr]; }
+    inline bool hasData(uint32_t r) { return (_writePtr - _readPtr) > r; }
+    ProtocolDecoder &rewind();
+    uint8_t get_byte();
+    ProtocolDecoder &readArrayStart();
+    ProtocolDecoder &readArrayEnd();
+    ProtocolDecoder &readMapStart();
+    ProtocolDecoder &readMapEnd();
+    ProtocolDecoder &read(bool &);
+    ProtocolDecoder &read(int &);
+    ProtocolDecoder &read(unsigned int &);
+    ProtocolDecoder &read(long &);
+    ProtocolDecoder &read(unsigned long &);
+    ProtocolDecoder &read(long long &);
+    ProtocolDecoder &read(unsigned long long &);
+    ProtocolDecoder &read(float &);
+    ProtocolDecoder &read(double &);
+    ProtocolDecoder &read(char *, uint32_t);
+    ProtocolDecoder &read(std::string &);
+    inline void error(int x)
+    {
+        _error = x;
+    }
+    inline bool ok() { return _error == 0; }
 
 private:
     uint8_t *_buffer;
     uint32_t _capacity;
-    uint32_t _index;
+    uint32_t _writePtr;
     uint32_t _readPtr;
     Fcs _fcs;
-    MajorType _type;
     int _error;
-    uint8_t read();
-    void advance(uint32_t);
+    CborHeader _h;
+    bool next();
 };
