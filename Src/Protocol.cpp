@@ -31,10 +31,9 @@ extern "C" void protocol_init()
 
 extern "C" void protocol_loop()
 {
-    if ((main_loop_counter % 1000) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
+    if ((main_loop_counter % 100000) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
     {
-        encoder->start().encodeArrayStart().encode("publish").encodeMapStart();
-        encoder->encode("src").encode("sideboard");
+        encoder->start().encodeArrayStart().encode("pub").encode("src/sideboard/").encodeMapStart();
         encoder->encode("system/alive").encode(true);
         encoder->encode("mpu/temp").encode(mpu.temp);
         encoder->encode("mpu/status").encode(mpuStatus);
@@ -55,6 +54,18 @@ extern "C" void protocol_loop()
         encoder->encode("euler/yaw").encode(mpu.euler.yaw);
         encoder->encodeMapEnd();
         encoder->encodeArrayEnd().end();
+        usartSendDMA(encoder->buffer(), encoder->size());
+    }
+    else if ((main_loop_counter % 5500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
+    {
+        encoder->start().encodeArrayStart().encode("sub").encode("dst/sideboard/*").encodeArrayEnd().end();
+        usartSendDMA(encoder->buffer(), encoder->size());
+    }
+    else if ((main_loop_counter % 10500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
+    {
+        uint32_t msec;
+        get_tick_count_ms(&msec);
+        encoder->start().encodeArrayStart().encode("pub").encode("dst/sideboard/").encodeMapStart().encode("system/uptime").encode(msec).encodeMapEnd().encodeArrayEnd().end();
         usartSendDMA(encoder->buffer(), encoder->size());
     }
 }
@@ -84,11 +95,27 @@ extern "C" void protocol_handle(uint8_t *buffer, uint32_t size)
 void handleMessage(ProtocolDecoder *decoder)
 {
     std::string str;
-    if (decoder->rewind().decodeArrayStart().decode(str).ok())
+    if (decoder->rewind().arrayStart().get(str).ok())
     {
         if (str == "ping" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
         {
             encoder->start().encodeArrayStart().encode("pong").encodeArrayEnd().end();
+            usartSendDMA(encoder->buffer(), encoder->size());
+        }
+        else if (str == "pub" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
+        {
+            if ( decoder->get(str).ok() ) {
+                if ( str =="dst/sideboard/system/uptime") {
+                    uint32_t msec;
+                    uint32_t now;
+                    get_tick_count_ms(&now);
+                    if ( decoder->get(msec).ok()) {
+                        encoder->start().encodeArrayStart().encode("pub").encode("src/sideboard/system/latency").encode(now-msec).end();
+                    }
+                } else {
+                    encoder->start().encodeArrayStart().encode("pubReceived").encodeArrayEnd().end();
+                }
+            }
             usartSendDMA(encoder->buffer(), encoder->size());
         }
     }
@@ -204,6 +231,16 @@ ProtocolEncoder &ProtocolEncoder::encode(int value)
 }
 
 ProtocolEncoder &ProtocolEncoder::encode(int32_t value)
+{
+    return encode((int64_t)value);
+}
+
+ProtocolEncoder &ProtocolEncoder::encode(uint32_t value)
+{
+    return encode((int64_t)value);
+}
+
+ProtocolEncoder &ProtocolEncoder::encode(uint64_t value)
 {
     return encode((int64_t)value);
 }
@@ -400,7 +437,7 @@ bool ProtocolDecoder::checkCrc()
     return false;
 }
 
-ProtocolDecoder &ProtocolDecoder::decodeArrayStart()
+ProtocolDecoder &ProtocolDecoder::arrayStart()
 {
     if (ok() && _buffer[_readPtr] == (MT_ARRAY << 5) + 31)
         advance(1);
@@ -409,7 +446,7 @@ ProtocolDecoder &ProtocolDecoder::decodeArrayStart()
     return *this;
 }
 
-ProtocolDecoder &ProtocolDecoder::decodeArrayEnd()
+ProtocolDecoder &ProtocolDecoder::arrayEnd()
 {
     if (ok() && _buffer[_readPtr] == (MT_PRIMITIVE << 5) + 31)
         advance(1);
@@ -418,7 +455,7 @@ ProtocolDecoder &ProtocolDecoder::decodeArrayEnd()
     return *this;
 }
 
-ProtocolDecoder &ProtocolDecoder::decodeMapStart()
+ProtocolDecoder &ProtocolDecoder::mapStart()
 {
     if (ok() && _buffer[_readPtr] == (MT_MAP << 5) + 31)
         advance(1);
@@ -427,7 +464,7 @@ ProtocolDecoder &ProtocolDecoder::decodeMapStart()
     return *this;
 }
 
-ProtocolDecoder &ProtocolDecoder::decodeMapEnd()
+ProtocolDecoder &ProtocolDecoder::mapEnd()
 {
     if (ok() && _buffer[_readPtr] == (MT_PRIMITIVE << 5) + 31)
         advance(1);
@@ -436,7 +473,7 @@ ProtocolDecoder &ProtocolDecoder::decodeMapEnd()
     return *this;
 }
 
-ProtocolDecoder &ProtocolDecoder::decode(std::string &s)
+ProtocolDecoder &ProtocolDecoder::get(std::string &s)
 {
     if (majorType() == MT_TEXT)
     {
@@ -445,6 +482,15 @@ ProtocolDecoder &ProtocolDecoder::decode(std::string &s)
         {
             s.push_back(read());
         }
+    }
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::get(uint32_t &ui)
+{
+    if (majorType() == MT_UNSIGNED)
+    {
+        
     }
     return *this;
 }

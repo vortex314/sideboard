@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <cstring>
 #include <errno.h>
+#include <systick.h>
 
 class Fcs
 {
@@ -116,10 +117,10 @@ public:
     MajorType majorType();
     void reset();
     bool checkCrc();
-    ProtocolDecoder& decodeArrayStart();
-    ProtocolDecoder& decodeArrayEnd();
-    ProtocolDecoder& decodeMapStart();
-    ProtocolDecoder& decodeMapEnd();
+    ProtocolDecoder& arrayStart();
+    ProtocolDecoder& arrayEnd();
+    ProtocolDecoder& mapStart();
+    ProtocolDecoder& mapEnd();
     ProtocolDecoder& get(int &);
     ProtocolDecoder& get(unsigned int &);
     ProtocolDecoder& get(long &);
@@ -129,7 +130,7 @@ public:
     ProtocolDecoder& get(float &);
     ProtocolDecoder& get(double &);
     ProtocolDecoder& get(char *,uint32_t);
-    ProtocolDecoder& decode(std::string&);
+    ProtocolDecoder& get(std::string&);
     void addByte(uint8_t);
     uint8_t *buffer() { return _buffer; }
     uint32_t size() { return _index; }
