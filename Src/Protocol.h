@@ -1,15 +1,15 @@
 #include <stdint.h>
 #include <cstring>
 #include <errno.h>
+#include <cstdint>
+#include <vector>
+#include <string>
 extern "C"
 {
 #include <systick.h>
 };
 //=========================================================================================
 // ================== CBOR ENCODER STREAM ===================
-#include <cstdint>
-#include <vector>
-#include <string>
 
 //==============================================================
 
@@ -192,14 +192,11 @@ class ProtocolDecoder
 {
 public:
     ProtocolDecoder(uint32_t);
-    void deframe(uint8_t *, uint32_t);
     void reset();
     bool checkCrc();
     void addUnEscaped(uint8_t);
     uint8_t *buffer() { return _buffer; }
     uint32_t size() { return _writePtr; }
-    inline uint8_t peek() { return _buffer[_readPtr]; }
-    inline bool hasData(uint32_t r) { return (_writePtr - _readPtr) > r; }
     ProtocolDecoder &rewind();
     uint8_t get_byte();
     ProtocolDecoder &readArrayStart();

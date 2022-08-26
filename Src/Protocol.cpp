@@ -31,10 +31,10 @@ extern "C" void protocol_init()
 
 extern "C" void protocol_loop()
 {
-    if ((main_loop_counter % 100000) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
+    if ((main_loop_counter % 10000) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
     {
-        encoder->start().writeArrayStart().write("pub").write("src/sideboard/");
-        encoder->writeMapStart();
+        encoder->start().write('[').write("pub").write("src/sideboard/");
+        encoder->write('{');
         encoder->write("system/alive").write(true);
         encoder->write("mpu/temp").write(mpu.temp);
         encoder->write("mpu/status").write(mpuStatus);
@@ -53,21 +53,21 @@ extern "C" void protocol_loop()
         encoder->write("euler/roll").write(mpu.euler.roll);
         encoder->write("euler/pitch").write(mpu.euler.pitch);
         encoder->write("euler/yaw").write(mpu.euler.yaw);
-        encoder->writeMapEnd();
-        encoder->writeArrayEnd().end();
-        usartSendDMA(encoder->buffer(), encoder->size());
+        encoder->write('}');
+        encoder->write(']').end();
+        usartSend(encoder->buffer(), encoder->size());
     }
     else if ((main_loop_counter % 5500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
     {
         encoder->start().writeArrayStart().write("sub").write("dst/sideboard/*").writeArrayEnd().end();
-        usartSendDMA(encoder->buffer(), encoder->size());
+        usartSend(encoder->buffer(), encoder->size());
     }
     else if ((main_loop_counter % 10500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
     {
         uint32_t msec;
         get_tick_count_ms(&msec);
         encoder->start().writeArrayStart().write("pub").write("dst/sideboard/").writeMapStart().write("system/uptime").write(msec).writeMapEnd().writeArrayEnd().end();
-        usartSendDMA(encoder->buffer(), encoder->size());
+        usartSend(encoder->buffer(), encoder->size());
     }
 }
 
@@ -92,7 +92,6 @@ extern "C" void protocol_handle(uint8_t *buffer, uint32_t size)
         }
     }
 }
-#include <string>
 void handleMessage(ProtocolDecoder *decoder)
 {
     std::string str;
@@ -101,7 +100,7 @@ void handleMessage(ProtocolDecoder *decoder)
         if (str == "ping" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
         {
             encoder->start().writeArrayStart().write("pong").writeArrayEnd().end();
-            usartSendDMA(encoder->buffer(), encoder->size());
+            usartSend(encoder->buffer(), encoder->size());
         }
         else if (str == "pub" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
         {
@@ -114,15 +113,17 @@ void handleMessage(ProtocolDecoder *decoder)
                     get_tick_count_ms(&now);
                     if (decoder->read(msec).ok())
                     {
-                        encoder->start().writeArrayStart().write("pub").write("src/sideboard/system/latency").write(now - msec).end();
+                        encoder->start().writeArrayStart().write("pub").write("src/sideboard/").writeMapStart().write("system/latency").write(now - msec).writeMapEnd();
+                        encoder->writeArrayEnd().end();
+                        usartSend(encoder->buffer(), encoder->size());
                     }
                 }
                 else
                 {
                     encoder->start().writeArrayStart().write("pubReceived").writeArrayEnd().end();
+                    usartSend(encoder->buffer(), encoder->size());
                 }
             }
-            usartSendDMA(encoder->buffer(), encoder->size());
         }
     }
 }
@@ -267,6 +268,22 @@ ProtocolEncoder &ProtocolEncoder::write(int64_t value)
     return *this;
 }
 
+ProtocolEncoder &ProtocolEncoder::write(char c)
+{
+    switch (c)
+    {
+    case '{':
+        return writeMapStart();
+    case '}':
+        return writeBreak();
+    case '[':
+        return writeArrayStart();
+    case ']':
+        return writeBreak();
+    }
+    return *this;
+}
+
 ProtocolEncoder &ProtocolEncoder::write(std::vector<uint8_t> &bs)
 {
     write_type_and_value(2, bs.size());
@@ -323,7 +340,7 @@ ProtocolEncoder &ProtocolEncoder::write(const std::string &s)
     return *this;
 }
 
-ProtocolEncoder &ProtocolEncoder::write(const char*s)
+ProtocolEncoder &ProtocolEncoder::write(const char *s)
 {
     size_t size = strlen(s);
     write_type_and_value(3, size);
@@ -593,16 +610,18 @@ ProtocolDecoder &ProtocolDecoder::read(uint32_t &ui)
 {
     uint64_t ui64;
     read(ui64);
-    ui=ui64;
+    ui = ui64;
     return *this;
 }
 
 ProtocolDecoder &ProtocolDecoder::read(int64_t &i)
 {
-    if (ok() && next() && ( _h.is_uint() || _h.is_int() ))
+    if (ok() && next() && (_h.is_uint() || _h.is_int()))
     {
-        if ( _h.is_uint() ) i = _h.val;
-        else i = -1 - _h.val;
+        if (_h.is_uint())
+            i = _h.val;
+        else
+            i = -1 - _h.val;
     }
     else
         error(EPROTO);
@@ -611,7 +630,7 @@ ProtocolDecoder &ProtocolDecoder::read(int64_t &i)
 
 ProtocolDecoder &ProtocolDecoder::read(bool &b)
 {
-    if (ok() && next() && ( _h.is_bool() ))
+    if (ok() && next() && (_h.is_bool()))
     {
         b = _h.as_bool();
     }
