@@ -1,155 +1,5 @@
 #include <Protocol.h>
 
-extern "C"
-{
-#include "defines.h"
-#include "gd32f1x0_usart.h"
-#include "defines.h"
-#include "setup.h"
-    extern MPU_Data mpu;
-    extern uint32_t main_loop_counter;
-    extern FlagStatus sensor1, sensor2;
-    extern ErrStatus mpuStatus;
-}
-
-void usartSendDMA(uint8_t *buffer, uint32_t size);
-void usartSend(uint8_t *buffer, uint32_t size);
-void handleMessage(ProtocolDecoder *decoder);
-
-#define INPUT_SIZE 256
-#define OUTPUT_SIZE 256
-
-ProtocolEncoder *encoder;
-ProtocolDecoder *decoder;
-
-extern "C" void protocol_init()
-{
-    encoder = new ProtocolEncoder(OUTPUT_SIZE);
-    decoder = new ProtocolDecoder(INPUT_SIZE);
-    usart_Tx_DMA_config(USART_MAIN, encoder->buffer(), encoder->size());
-}
-
-extern "C" void protocol_loop()
-{
-    if ((main_loop_counter % 10000) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
-    {
-        encoder->start().write('[').write("pub").write("src/sideboard/");
-        encoder->write('{');
-        encoder->write("system/alive").write(true);
-        encoder->write("mpu/temp").write(mpu.temp);
-        encoder->write("mpu/status").write(mpuStatus);
-        encoder->write("sensor/left").write(sensor1);
-        encoder->write("sensor/right").write(sensor2);
-        encoder->write("acc/x").write(mpu.accel.x);
-        encoder->write("acc/y").write(mpu.accel.y);
-        encoder->write("acc/z").write(mpu.accel.z);
-        encoder->write("gyro/x").write(mpu.gyro.x);
-        encoder->write("gyro/y").write(mpu.gyro.y);
-        encoder->write("gyro/z").write(mpu.gyro.z);
-        encoder->write("quat/w").write(mpu.quat.w);
-        encoder->write("quat/x").write(mpu.quat.x);
-        encoder->write("quat/y").write(mpu.quat.y);
-        encoder->write("quat/z").write(mpu.quat.z);
-        encoder->write("euler/roll").write(mpu.euler.roll);
-        encoder->write("euler/pitch").write(mpu.euler.pitch);
-        encoder->write("euler/yaw").write(mpu.euler.yaw);
-        encoder->write('}');
-        encoder->write(']').end();
-        usartSend(encoder->buffer(), encoder->size());
-    }
-    else if ((main_loop_counter % 5500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
-    {
-        encoder->start().writeArrayStart().write("sub").write("dst/sideboard/*").writeArrayEnd().end();
-        usartSend(encoder->buffer(), encoder->size());
-    }
-    else if ((main_loop_counter % 10500) == 0 && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
-    {
-        uint32_t msec;
-        get_tick_count_ms(&msec);
-        encoder->start().writeArrayStart().write("pub").write("dst/sideboard/").writeMapStart().write("system/uptime").write(msec).writeMapEnd().writeArrayEnd().end();
-        usartSend(encoder->buffer(), encoder->size());
-    }
-}
-
-extern "C" void protocol_handle(uint8_t *buffer, uint32_t size)
-{
-    if (decoder == 0)
-        return;
-    for (uint32_t i = 0; i < size; i++)
-    {
-        auto b = buffer[i];
-        if (b == PPP_FLAG_CHAR)
-        {
-            if (decoder->size() > 2 && decoder->ok() && decoder->checkCrc())
-            {
-                handleMessage(decoder);
-            }
-            decoder->reset();
-        }
-        else
-        {
-            decoder->addUnEscaped(b);
-        }
-    }
-}
-void handleMessage(ProtocolDecoder *decoder)
-{
-    std::string str;
-    if (decoder->rewind().readArrayStart().read(str).ok())
-    {
-        if (str == "ping" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
-        {
-            encoder->start().writeArrayStart().write("pong").writeArrayEnd().end();
-            usartSend(encoder->buffer(), encoder->size());
-        }
-        else if (str == "pub" && dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
-        {
-            if (decoder->read(str).ok())
-            {
-                if (str == "dst/sideboard/system/uptime")
-                {
-                    uint32_t msec = 0;
-                    uint32_t now;
-                    get_tick_count_ms(&now);
-                    if (decoder->read(msec).ok())
-                    {
-                        encoder->start().writeArrayStart().write("pub").write("src/sideboard/").writeMapStart().write("system/latency").write(now - msec).writeMapEnd();
-                        encoder->writeArrayEnd().end();
-                        usartSend(encoder->buffer(), encoder->size());
-                    }
-                }
-                else
-                {
-                    encoder->start().writeArrayStart().write("pubReceived").writeArrayEnd().end();
-                    usartSend(encoder->buffer(), encoder->size());
-                }
-            }
-        }
-    }
-}
-
-void usartSendDMA(uint8_t *buffer, uint32_t size)
-{
-    if (dma_transfer_number_get(USART1_TX_DMA_CH) == 0)
-    { // Check if DMA channel counter is 0 (meaning all data has been transferred)
-
-        dma_channel_disable(USART1_TX_DMA_CH);
-        DMA_CHCNT(USART1_TX_DMA_CH) = size;
-        DMA_CHMADDR(USART1_TX_DMA_CH) = (uint32_t)buffer;
-        dma_channel_enable(USART1_TX_DMA_CH);
-    }
-}
-
-void usartSend(uint8_t *buffer, uint32_t size)
-{
-    for (uint32_t i = 0; i < size; i++)
-    {
-        usart_data_transmit(USART_MAIN, (uint8_t)buffer[i]);
-        while (RESET == usart_flag_get(USART_MAIN, USART_FLAG_TBE))
-            ;
-    }
-}
-
 //==============================================================================
 static const uint16_t fcsTable[256] = {
     0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF, 0x8C48,
@@ -190,17 +40,17 @@ bool Fcs::write(uint8_t b)
 //=============================================================================
 ProtocolEncoder::ProtocolEncoder(uint32_t size)
 {
-    auto pui = new uint32_t[(size / 4) + 1]; // allocate space for the array in 4 byte words
-    _buffer = (uint8_t *)pui;
-    _capacity = ((size / 4) + 1) * 4;
-    _index = 0;
+    //   auto pui = new uint32_t[(size / 4) + 1]; // allocate space for the array in 4 byte words
+    reserve(size);
+    //  _buffer = (uint8_t *)pui;
+    _capacity = size;
 }
 
 ProtocolEncoder &ProtocolEncoder::start()
 {
-    _index = 0;
     _error = 0;
     _fcs.clear();
+    clear();
     addByte(PPP_FLAG_CHAR);
     return *this;
 }
@@ -272,6 +122,10 @@ ProtocolEncoder &ProtocolEncoder::write(char c)
 {
     switch (c)
     {
+    case '<':
+        return start();
+    case '>':
+        return end();
     case '{':
         return writeMapStart();
     case '}':
@@ -428,26 +282,27 @@ void ProtocolEncoder::addEscaped(uint8_t value)
 }
 void ProtocolEncoder::addByte(uint8_t value)
 {
-    if (_index + 1 > _capacity)
+    if (size() + 1 > _capacity)
     {
         _error = ENOMEM;
         return;
     }
-    _buffer[_index++] = value;
+    push_back(value);
 }
 
 //===============================================================
 
 ProtocolDecoder::ProtocolDecoder(uint32_t size)
 {
-    _buffer = new uint8_t[size];
+    // _buffer = new uint8_t[size];
+    reserve(size);
     _capacity = size;
-    _writePtr = 0;
+    // _writePtr = 0;
 }
 
 void ProtocolDecoder::reset()
 {
-    _writePtr = 0;
+    clear();
     _error = 0;
     _readPtr = 0;
 }
@@ -462,7 +317,7 @@ ProtocolDecoder &ProtocolDecoder::rewind()
 void ProtocolDecoder::addUnEscaped(uint8_t c)
 {
     static bool escFlag = false;
-    if (_writePtr + 1 > _capacity)
+    if (size() + 1 > _capacity)
     {
         _error = ENOMEM;
         return;
@@ -470,7 +325,7 @@ void ProtocolDecoder::addUnEscaped(uint8_t c)
     if (escFlag)
     {
         escFlag = false;
-        _buffer[_writePtr++] = c ^ PPP_MASK_CHAR;
+        push_back(c ^ PPP_MASK_CHAR);
     }
     else
     {
@@ -480,17 +335,17 @@ void ProtocolDecoder::addUnEscaped(uint8_t c)
         }
         else
         {
-            _buffer[_writePtr++] = c;
+            push_back(c);
         }
     }
 }
 
 bool ProtocolDecoder::next()
 {
-    _h.hdr = get_byte();
+    _h.firstByte = get_byte();
     if (!ok())
         return false;
-    const uint8_t t = _h.hdr & 31u;
+    const uint8_t t = _h.firstByte & 31u;
 
     if (t < 24)
     {
@@ -534,14 +389,16 @@ bool ProtocolDecoder::next()
 
 bool ProtocolDecoder::checkCrc()
 {
+
     Fcs fcs;
-    for (uint32_t i = 0; i < _writePtr; i++)
+    for (uint32_t i = 0; i < size(); i++)
     {
-        fcs.write(_buffer[i]);
+        fcs.write(at(i));
     }
     if (fcs.result() == 0x0F47)
     {
-        _writePtr -= 2;
+        pop_back();
+        pop_back();
         return true;
     }
     return false;
@@ -581,6 +438,44 @@ ProtocolDecoder &ProtocolDecoder::readMapStart()
         error(EPROTO);
     return *this;
 }
+// check if string is expected value
+ProtocolDecoder &ProtocolDecoder::read(const char *s)
+{
+    std::string str;
+    if (read(str).ok() && s == str)
+        return *this;
+    error(EINVAL);
+    return *this;
+}
+
+// check special marker is found
+ProtocolDecoder &ProtocolDecoder::read(const char c)
+{
+    switch (c)
+    {
+    case '[':
+    {
+        readArrayStart();
+        break;
+    }
+    case ']':
+    {
+        readArrayEnd();
+        break;
+    }
+    case '{':
+    {
+        readMapStart();
+        break;
+    }
+    case '}':
+    {
+        readMapEnd();
+        break;
+    }
+    }
+    return *this;
+}
 
 ProtocolDecoder &ProtocolDecoder::read(std::string &s)
 {
@@ -589,6 +484,33 @@ ProtocolDecoder &ProtocolDecoder::read(std::string &s)
         s.clear();
         for (uint32_t i = 0; i < _h.val; i++)
             s.push_back(get_byte());
+    }
+    else
+        error(EPROTO);
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::read(float &d)
+{
+    if (ok() && next() && _h.is_float())
+    {
+        union
+        {
+            float f;
+            uint8_t b[4];
+        } output;
+#ifdef __LITTLE_ENDIAN__
+        output.b[0] = _h.val;
+        output.b[1] = _h.val >> 8;
+        output.b[2] = _h.val >> 16;
+        output.b[3] = _h.val >> 24;
+#else
+        output.b[3] = _h.val;
+        output.b[2] = _h.val >> 8;
+        output.b[1] = _h.val >> 16;
+        output.b[0] = _h.val >> 24;
+#endif
+        d = output.f;
     }
     else
         error(EPROTO);
@@ -608,13 +530,27 @@ ProtocolDecoder &ProtocolDecoder::read(uint64_t &ui)
 
 ProtocolDecoder &ProtocolDecoder::read(uint32_t &ui)
 {
-    uint64_t ui64;
+    uint64_t ui64 = 0;
     read(ui64);
     ui = ui64;
     return *this;
 }
 
 ProtocolDecoder &ProtocolDecoder::read(int64_t &i)
+{
+    if (ok() && next() && (_h.is_uint() || _h.is_int()))
+    {
+        if (_h.is_uint())
+            i = _h.val;
+        else
+            i = -1 - _h.val;
+    }
+    else
+        error(EPROTO);
+    return *this;
+}
+
+ProtocolDecoder &ProtocolDecoder::read(int32_t &i)
 {
     if (ok() && next() && (_h.is_uint() || _h.is_int()))
     {
@@ -641,9 +577,31 @@ ProtocolDecoder &ProtocolDecoder::read(bool &b)
 
 uint8_t ProtocolDecoder::get_byte()
 {
-    if (_readPtr < _writePtr)
+    if (_readPtr < size())
     {
-        return _buffer[_readPtr++];
+        return at(_readPtr++);
     };
     return 0;
+}
+
+void ProtocolDecoder::put_byte(uint8_t b)
+{
+    if (size() < _capacity)
+        push_back(b);
+    else
+        error(ENOMEM);
+}
+
+void ProtocolDecoder::put_bytes(const uint8_t *b, uint32_t size)
+{
+    for (uint32_t i = 0; i < size; i++)
+        put_byte(b[i]);
+}
+
+CborHeader ProtocolDecoder::peek()
+{
+    CborHeader hdr;
+    uint8_t b = at(_readPtr);
+    hdr.firstByte = b;
+    return hdr;
 }
